@@ -267,42 +267,6 @@ static void AimbotTick(uintptr_t local, const Matrix4x4& vm, float sw, float sh)
 
 static FFOverlay *g_overlay = nil;
 
-static UIWindow *FindKeyWindow(void) {
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            if (w.isKeyWindow) return w;
-        }
-    }
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (UIApplication.sharedApplication.keyWindow) return UIApplication.sharedApplication.keyWindow;
-#pragma clang diagnostic pop
-    for (UIWindow *w in UIApplication.sharedApplication.windows) {
-        if (w.isKeyWindow) return w;
-    }
-    return UIApplication.sharedApplication.windows.firstObject;
-}
-
-static void StartOverlay() {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_overlay && g_overlay.superview) return; // already up
-        UIWindow *key = FindKeyWindow();
-        if (!key) return;
-        UIView *root = key.rootViewController.view ?: key;
-
-        g_overlay = [[FFOverlay alloc] initWithFrame:root.bounds];
-        g_overlay.userInteractionEnabled = NO;
-        g_overlay.backgroundColor = UIColor.clearColor;
-        g_overlay.opaque = NO;
-        g_overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [root addSubview:g_overlay];
-
-        CADisplayLink *link = [CADisplayLink displayLinkWithTarget:g_overlay selector:@selector(setNeedsDisplay)];
-        [link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-        NSLog(@"[FFPanel] overlay attached");
-    });
-}
 
 // ---------------------------------------------------------------
 //  Feature tick (every ~80 ms)
@@ -330,6 +294,80 @@ static void FeatureTick() {
     }
 }
 
+
+// ---------------------------------------------------------------
+//  LiveContainer-safe overlay window (UIWindowScene)
+// ---------------------------------------------------------------
+static UIWindow *g_overlayWindow = nil;
+static BOOL g_testRedFlash = YES; // first 3 seconds solid red so we KNOW inject works
+
+static void StartOverlay(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_overlayWindow && !g_overlayWindow.hidden) {
+            // already up — just re-attach panel
+            [[FFPanel shared] attachToOverlayWindow:g_overlayWindow];
+            return;
+        }
+
+        UIWindowScene *windowScene = nil;
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                if (ws.activationState == UISceneActivationStateForegroundActive ||
+                    ws.activationState == UISceneActivationStateForegroundInactive) {
+                    windowScene = ws;
+                    break;
+                }
+                if (!windowScene) windowScene = ws;
+            }
+        }
+        if (!windowScene) {
+            NSLog(@"[FFPanel] no UIWindowScene yet");
+            return;
+        }
+
+        g_overlayWindow = [[UIWindow alloc] initWithWindowScene:windowScene];
+        g_overlayWindow.frame = windowScene.coordinateSpace.bounds;
+        g_overlayWindow.windowLevel = UIWindowLevelAlert + 100;
+        g_overlayWindow.backgroundColor = g_testRedFlash ? [UIColor colorWithRed:1 green:0 blue:0 alpha:0.35] : UIColor.clearColor;
+        g_overlayWindow.opaque = NO;
+        g_overlayWindow.userInteractionEnabled = YES;
+
+        UIViewController *rootVC = [UIViewController new];
+        rootVC.view.backgroundColor = UIColor.clearColor;
+        rootVC.view.frame = g_overlayWindow.bounds;
+        g_overlayWindow.rootViewController = rootVC;
+
+        // ESP overlay (draw only)
+        g_overlay = [[FFOverlay alloc] initWithFrame:rootVC.view.bounds];
+        g_overlay.userInteractionEnabled = NO;
+        g_overlay.backgroundColor = UIColor.clearColor;
+        g_overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [rootVC.view addSubview:g_overlay];
+
+        // floating button + menu on SAME window
+        [[FFPanel shared] attachToOverlayWindow:g_overlayWindow];
+
+        g_overlayWindow.hidden = NO;
+        [g_overlayWindow makeKeyAndVisible];
+
+        CADisplayLink *link = [CADisplayLink displayLinkWithTarget:g_overlay selector:@selector(setNeedsDisplay)];
+        [link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+
+        NSLog(@"[FFPanel] OVERLAY WINDOW LIVE scene=%@", windowScene);
+
+        // turn red diagnostic off after 3s so game is usable
+        if (g_testRedFlash) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                g_testRedFlash = NO;
+                g_overlayWindow.backgroundColor = UIColor.clearColor;
+                NSLog(@"[FFPanel] red diagnostic off");
+            });
+        }
+    });
+}
+
+
 // ---------------------------------------------------------------
 //  Hooks
 // ---------------------------------------------------------------
@@ -340,28 +378,28 @@ static void FeatureTick() {
 %end
 
 %ctor {
+    NSLog(@"[FFPanel] ===== CTOR FIRED =====");
     ResolveBases();
     [[AntiBan shared] start];
 
-    // LiveContainer: keep trying to attach to the real keyWindow
-    void (^tryAttach)(void) = ^{
-        [[FFPanel shared] show];
-        if (!g_menu) g_menu = [[FFPanel shared] menu];
+    void (^tryBoot)(void) = ^{
         StartOverlay();
+        if (!g_menu) {
+            g_menu = [[FFPanel shared] menu];
+            NSLog(@"[FFPanel] g_menu=%@", g_menu);
+        }
     };
 
-    // burst attach for first 15 seconds
-    for (int i = 0; i < 20; i++) {
-        double delay = 0.5 + i * 0.75;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), tryAttach);
+    // aggressive: every 0.4s for 20s
+    for (int i = 0; i < 50; i++) {
+        double d = 0.3 + i * 0.4;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(d * NSEC_PER_SEC)), dispatch_get_main_queue(), tryBoot);
     }
 
-    // slow keep-alive every 3s in case LiveContainer swaps windows
-    dispatch_source_t keep = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                    dispatch_get_main_queue());
-    dispatch_source_set_timer(keep, dispatch_time(DISPATCH_TIME_NOW, 15ull * NSEC_PER_SEC),
-                              3ull * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(keep, ^{ [[FFPanel shared] show]; });
+    // keep-alive forever every 4s
+    dispatch_source_t keep = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(keep, dispatch_time(DISPATCH_TIME_NOW, 20ull * NSEC_PER_SEC), 4ull * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(keep, tryBoot);
     dispatch_resume(keep);
 
     // feature loop
@@ -370,6 +408,4 @@ static void FeatureTick() {
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 0), 80ull * NSEC_PER_MSEC, 10ull * NSEC_PER_MSEC);
     dispatch_source_set_event_handler(timer, ^{ FeatureTick(); });
     dispatch_resume(timer);
-
-    NSLog(@"[FFPanel] ctor live — LiveContainer attach mode");
 }
