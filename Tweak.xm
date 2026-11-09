@@ -6,6 +6,12 @@
 #import "AntiBan.h"
 #import "Panel.h"
 
+// force selector visible to Logos preprocessor (LiveContainer overlay path)
+@interface FFPanel (OverlayAttach)
+- (void)attachToOverlayWindow:(UIWindow *)win;
+@end
+
+
 static uintptr_t g_il2cpp = 0;
 static uintptr_t g_unity  = 0;
 static MenuView *g_menu = nil;
