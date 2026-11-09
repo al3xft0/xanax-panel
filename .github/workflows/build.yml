@@ -13,9 +13,13 @@ jobs:
       - name: Setup Theos & SDKs
         run: |
           git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-          git clone https://github.com/theos/sdks.git $GITHUB_WORKSPACE/sdks-repo
+          git clone --depth=1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/sdks-repo
           mkdir -p $GITHUB_WORKSPACE/theos/sdks
-          cp -r $GITHUB_WORKSPACE/sdks-repo/*.sdk $GITHUB_WORKSPACE/theos/sdks/
+          for sdk in $GITHUB_WORKSPACE/sdks-repo/iPhoneOS*.sdk; do
+            if [ -d "$sdk" ]; then
+              cp -R "$sdk" $GITHUB_WORKSPACE/theos/sdks/
+            fi
+          done
           rm -rf $GITHUB_WORKSPACE/sdks-repo
 
       - name: Install ldid
