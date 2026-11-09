@@ -11,12 +11,21 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-dir: theos
+
+      - name: Install ldid
         run: |
-          git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          brew install ldid
+          echo "PATH=/opt/homebrew/bin:$PATH" >> $GITHUB_ENV
+          which ldid
+          ldid 2>&1 | head -5 || true
 
       - name: Build package
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
+          export PATH="/opt/homebrew/bin:$PATH"
           make package FINALPACKAGE=1
 
       - name: Upload deb
@@ -25,3 +34,4 @@ jobs:
           name: ffpanel-deb
           path: packages/*.deb
           if-no-files-found: error
+          retention-days: 7
