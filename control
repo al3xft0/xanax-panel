@@ -1,0 +1,9 @@
+Package: com.ollie.ffpanel
+Name: FF Panel
+Version: 1.1.0
+Architecture: iphoneos-arm
+Description: Free Fire floating cheat panel — ESP, Aimbot, NoRecoil, NoSpread, Speed + AntiBan
+Maintainer: olliE
+Author: olliE
+Section: Tweaks
+Depends: mobilesubstrate
