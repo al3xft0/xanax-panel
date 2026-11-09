@@ -267,24 +267,40 @@ static void AimbotTick(uintptr_t local, const Matrix4x4& vm, float sw, float sh)
 
 static FFOverlay *g_overlay = nil;
 
+static UIWindow *FindKeyWindow(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            if (w.isKeyWindow) return w;
+        }
+    }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if (UIApplication.sharedApplication.keyWindow) return UIApplication.sharedApplication.keyWindow;
+#pragma clang diagnostic pop
+    for (UIWindow *w in UIApplication.sharedApplication.windows) {
+        if (w.isKeyWindow) return w;
+    }
+    return UIApplication.sharedApplication.windows.firstObject;
+}
+
 static void StartOverlay() {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *key = nil;
-        for (UIWindow *w in UIApplication.sharedApplication.windows) {
-            if (w.isKeyWindow) { key = w; break; }
-        }
-        if (!key) key = UIApplication.sharedApplication.keyWindow;
+        if (g_overlay && g_overlay.superview) return; // already up
+        UIWindow *key = FindKeyWindow();
         if (!key) return;
+        UIView *root = key.rootViewController.view ?: key;
 
-        g_overlay = [[FFOverlay alloc] initWithFrame:key.bounds];
+        g_overlay = [[FFOverlay alloc] initWithFrame:root.bounds];
         g_overlay.userInteractionEnabled = NO;
         g_overlay.backgroundColor = UIColor.clearColor;
         g_overlay.opaque = NO;
-        [key addSubview:g_overlay];
+        g_overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [root addSubview:g_overlay];
 
-        // redraw timer
         CADisplayLink *link = [CADisplayLink displayLinkWithTarget:g_overlay selector:@selector(setNeedsDisplay)];
         [link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        NSLog(@"[FFPanel] overlay attached");
     });
 }
 
@@ -324,30 +340,36 @@ static void FeatureTick() {
 %end
 
 %ctor {
-    // resolve ASAP
     ResolveBases();
     [[AntiBan shared] start];
 
-    // force panel + floating button as soon as UIKit is alive
-    void (^boot)(void) = ^{
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{
-            [[FFPanel shared] show];          // floating FF button always on
-            g_menu = [[FFPanel shared] menu];
-            StartOverlay();
-            NSLog(@"[FFPanel] boot complete — button should be visible");
-        });
+    // LiveContainer: keep trying to attach to the real keyWindow
+    void (^tryAttach)(void) = ^{
+        [[FFPanel shared] show];
+        if (!g_menu) g_menu = [[FFPanel shared] menu];
+        StartOverlay();
     };
 
-    // try at 1s, 2.5s, 5s so we catch late UIApplication
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), boot);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), boot);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), boot);
+    // burst attach for first 15 seconds
+    for (int i = 0; i < 20; i++) {
+        double delay = 0.5 + i * 0.75;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), tryAttach);
+    }
 
-    // feature loop — antiban still gates the *features*, not the menu
+    // slow keep-alive every 3s in case LiveContainer swaps windows
+    dispatch_source_t keep = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                    dispatch_get_main_queue());
+    dispatch_source_set_timer(keep, dispatch_time(DISPATCH_TIME_NOW, 15ull * NSEC_PER_SEC),
+                              3ull * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(keep, ^{ [[FFPanel shared] show]; });
+    dispatch_resume(keep);
+
+    // feature loop
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                      dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0));
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 0), 80ull * NSEC_PER_MSEC, 10ull * NSEC_PER_MSEC);
     dispatch_source_set_event_handler(timer, ^{ FeatureTick(); });
     dispatch_resume(timer);
+
+    NSLog(@"[FFPanel] ctor live — LiveContainer attach mode");
 }
