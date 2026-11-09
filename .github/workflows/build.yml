@@ -10,22 +10,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Theos
-        uses: Randomblock1/theos-action@v1
-        with:
-          theos-dir: theos
+      - name: Setup Theos & SDKs
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          git clone https://github.com/theos/sdks.git $GITHUB_WORKSPACE/sdks-repo
+          mkdir -p $GITHUB_WORKSPACE/theos/sdks
+          cp -r $GITHUB_WORKSPACE/sdks-repo/*.sdk $GITHUB_WORKSPACE/theos/sdks/
+          rm -rf $GITHUB_WORKSPACE/sdks-repo
 
       - name: Install ldid
         run: |
           brew install ldid
-          echo "PATH=/opt/homebrew/bin:$PATH" >> $GITHUB_ENV
-          which ldid
-          ldid 2>&1 | head -5 || true
 
       - name: Build package
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
-          export PATH="/opt/homebrew/bin:$PATH"
           make package FINALPACKAGE=1
 
       - name: Upload deb
