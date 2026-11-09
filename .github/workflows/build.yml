@@ -15,7 +15,7 @@ jobs:
           git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
           git clone --depth=1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/sdks-repo
           mkdir -p $GITHUB_WORKSPACE/theos/sdks
-          for sdk in $GITHUB_WORKSPACE/sdks-repo/iPhoneOS*.sdk; do
+          for sdk in $GITHUB_WORKSPACE/sdks-repo/iPhoneOS*; do
             if [ -d "$sdk" ]; then
               cp -R "$sdk" $GITHUB_WORKSPACE/theos/sdks/
             fi
@@ -25,16 +25,21 @@ jobs:
       - name: Install ldid
         run: |
           brew install ldid
+          echo "PATH=/opt/homebrew/bin:$PATH" >> $GITHUB_ENV
+          which ldid
 
       - name: Build package
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
+          export PATH="/opt/homebrew/bin:$PATH"
           make package FINALPACKAGE=1
 
-      - name: Upload deb
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ffpanel-deb
-          path: packages/*.deb
+          name: ffpanel-build
+          path: |
+            packages/*.deb
+            packages/*.dylib
           if-no-files-found: error
           retention-days: 7
