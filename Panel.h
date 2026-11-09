@@ -7,4 +7,5 @@
 - (void)hide;
 - (void)toggle;
 - (MenuView *)menu;
+- (void)attachToOverlayWindow:(UIWindow *)win;
 @end
