@@ -2,6 +2,9 @@ TARGET := iphone:clang:latest:14.0
 INSTALL_TARGET_PROCESSES = freefireth
 ARCHS = arm64 arm64e
 
+# CI runners need ldid on PATH for the final sign step
+export PATH := /opt/homebrew/bin:$(PATH)
+
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = FFPanel
@@ -14,4 +17,5 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 
 after-package::
 	@echo "==== FFPanel package ready ===="
-	@ls -la packages/
+	@ls -la packages/ || true
+	@find packages -type f 2>/dev/null || true
