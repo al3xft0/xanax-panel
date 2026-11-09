@@ -324,18 +324,27 @@ static void FeatureTick() {
 %end
 
 %ctor {
+    // resolve ASAP
     ResolveBases();
     [[AntiBan shared] start];
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([[AntiBan shared] isSafe]) {
-            [[FFPanel shared] show];
+    // force panel + floating button as soon as UIKit is alive
+    void (^boot)(void) = ^{
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            [[FFPanel shared] show];          // floating FF button always on
             g_menu = [[FFPanel shared] menu];
             StartOverlay();
-        }
-    });
+            NSLog(@"[FFPanel] boot complete — button should be visible");
+        });
+    };
 
-    // feature loop
+    // try at 1s, 2.5s, 5s so we catch late UIApplication
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), boot);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), boot);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), boot);
+
+    // feature loop — antiban still gates the *features*, not the menu
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                      dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0));
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 0), 80ull * NSEC_PER_MSEC, 10ull * NSEC_PER_MSEC);
